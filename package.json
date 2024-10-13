@@ -28,6 +28,7 @@
   "homepage": "https://github.com/hexforged/server#readme",
   "dependencies": {
     "dotenv": "latest",
+    "mysql": "latest",
     "winston": "latest",
     "winston-daily-rotate-file": "latest",
     "socket.io": "latest"
