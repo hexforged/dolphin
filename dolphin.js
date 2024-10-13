@@ -1,5 +1,5 @@
 /**
- * $KYAULabs: dolphin.js,v 0.1.0 2024/10/04 04:20:36 kyau Exp $
+ * $KYAULabs: dolphin.js,v 1.0.1 2024/10/12 22:25:02 -0700 kyau Exp $
  * ▄▄▄▄ ▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  * █ ▄▄ ▄ ▄▄▄▄ ▄▄ ▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄ ▄▄▄  ▀
  * █ ██ █ ██ ▀ ██ █ ██ ▀ ██ █ ██ █ ██    ██ ▀ ██ █ █
@@ -26,7 +26,7 @@
  */
 
 import 'dotenv/config';
-import { logger } from "./logger.js";
+import { logger } from './logger.mjs';
 import { Server } from 'socket.io';
 
 const PORT = process.env.port || 4242;
@@ -42,18 +42,11 @@ const io = new Server(PORT, {
   transports: [ 'websocket', 'polling' ]
 });
 
-console.log(
-  `\x1b[0;36m \ue68e \x1b[0;35mHexforged\x1b[0m \x1b[37mServer\x1b[0m \x1b[2m(${process.env.NODE_ENV})\x1b[0m`
-);
-console.log(
-  ` - Public\x1b[4;37m:\x1b[0m \x1b[36mhttps://hexforged.com\x1b[0m`
-);
-console.log(
-  ` - Internal\x1b[4;37m:\x1b[0m \x1b[36mhttp://localhost:${PORT}\x1b[0m`
-);
-logger.info(`Server running at http://127.0.0.1:${PORT}`);
+console.log(`\x1b[0;36m\udb86\udcb4  \x1b[0;35mdolphin\x1b[0m \x1b[2;37m(${process.env.NODE_ENV})\x1b[0m`);
+console.log(`\x1b[3C\x1b[38;5;214mhttps://hexforged.com/dolphin\x1b[0m`);
+logger.info('Server started.');
 
-let socket_list = {};
+let socketList = {};
 // Handle connections
 io.on('connection', (socket) => {
   socket.on('*', (packet) => {
@@ -61,7 +54,7 @@ io.on('connection', (socket) => {
     logger.info({ eventName, eventData, socketId: socket.id, });
   });
 
-  socket_list[socket.id] = socket;
+  socketList[socket.id] = socket;
 
   let _io_emit = io.emit;
   let _socket_emit = socket.emit;
@@ -69,18 +62,27 @@ io.on('connection', (socket) => {
   io.emit = function () {
     _io_emit.apply(io, arguments);
     let { 0: eventName, 1: eventData } = arguments;
-    logger.info({ eventName: `[Global Emit] ${eventName}`, eventData, });
+    logger.debug(`[Global Emit] name:${eventName}`, eventData);
   };
     
   socket.emit = function () {
     _socket_emit.apply(socket, arguments);
     let { 0: eventName, 1: eventData } = arguments;
-    logger.info({ eventName: `[Emit] ${eventName}`, eventData, socketId: socket.id, });
+    logger.debug(`[Emit] name:${eventName} data:`, eventData, `socketId: ${socket.id}`);
   };
 
+  // verify user via token
+  let ip = socket.handshake.headers['x-real-ip'];
+  const cookies = socket.handshake.headers['cookie'].split('; ');
+  const hexToken = cookies.find(cookie => cookie.startsWith('hex_token='));
+
+  // TODO: insert user verification logic
+
+  logger.http(`user@${ip} connected. token:`, hexToken.split('=')[1]);
+
   socket.on('disconnect', (socket) => {
-    delete socket_list[socket.id];
-    logger.info('Socket disconnected!');
+    delete socketList[socket.id];
+    logger.info('User disconnected!');
   });
 
   socket.on('ping', (cb) => {
@@ -100,12 +102,31 @@ io.on('connection', (socket) => {
 });
 
 // Handle unhandled promise rejections
-process.on("unhandledRejection", (err, promise) => {
-  logger.error(`Error: ${err.message}`);
-  // close server and exit
-  io.close(() => process.exit(1));
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error(`Unhandled Rejection at: ${promise} reason: ${reason}`);
 });
 
-/**
- * vim: ft=javascript sts=2 sw=2 ts=2 noet:
- */
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error(`Caught exception: ${error}\n` + `Exception origin: ${error.stack}`);
+});
+
+// graceful shutdown
+process.on('SIGINT', () => {
+  logger.error('SIGINT received, shutting down.');
+  let conn = typeof Object.keys(socketList).length !== 'undefined' ? Object.keys(socketList).length : 0
+  logger.info(`Closing out remaining connections (${conn})`);
+  io.close(() => {
+    // additional cleanup tasks, e.g., close database connection
+    process.exit(0);
+  });
+});
+process.on('SIGTERM', () => {
+  logger.error('SIGTERM received, shutting down.');
+  let conn = typeof Object.keys(socketList).length !== 'undefined' ? Object.keys(socketList).length : 0
+  logger.info(`Closing out remaining connections (${conn})`);
+  io.close(() => {
+    // additional cleanup tasks, e.g., close database connection
+    process.exit(0);
+  });
+});
