@@ -47,9 +47,11 @@ const {
 	createLogger,
 	transports,
 	config: {
-		npm: { levels },
+		npm: { colors, levels },
 	},
 } = winston;
+
+//console.log(winston.config.npm);
 
 /**
  * Combines the message with additional arguments (splat) if any, and uppercases the log level.
@@ -143,6 +145,9 @@ const errorTransport = new transports.DailyRotateFile({
  * @constant
  * @type {winston.Logger}
  */
+let rcolors = colors;
+rcolors.info = 'white';
+winston.addColors(rcolors);
 const logger = createLogger({
 	levels: levels,
 	defaultMeta: {

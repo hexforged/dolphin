@@ -1,5 +1,5 @@
 /**
- * $KYAULabs: dolphin.js,v 1.0.1 2024/10/12 22:25:02 -0700 kyau Exp $
+ * $KYAULabs: dolphin.js,v 1.0.2 2024/10/12 22:25:02 -0700 kyau Exp $
  * ▄▄▄▄ ▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  * █ ▄▄ ▄ ▄▄▄▄ ▄▄ ▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄ ▄▄▄  ▀
  * █ ██ █ ██ ▀ ██ █ ██ ▀ ██ █ ██ █ ██    ██ ▀ ██ █ █
@@ -27,6 +27,7 @@
 
 import 'dotenv/config';
 import { logger } from './logger.mjs';
+import { MySQLHandler } from './sql.mjs';
 import { Server } from 'socket.io';
 
 const PORT = process.env.port || 4242;
@@ -46,9 +47,16 @@ console.log(`\x1b[0;36m\udb86\udcb4  \x1b[0;35mdolphin\x1b[0m \x1b[2;37m(${proce
 console.log(`\x1b[3C\x1b[38;5;214mhttps://hexforged.com/dolphin\x1b[0m`);
 logger.info('Server started.');
 
+const sql = new MySQLHandler();
+try {
+  await sql.connect();
+} catch (error) {
+  logger.error(error);
+}
+
 let socketList = {};
 // Handle connections
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
   socket.on('*', (packet) => {
     const [eventName, eventData] = packet.data;
     logger.info({ eventName, eventData, socketId: socket.id, });
@@ -71,30 +79,47 @@ io.on('connection', (socket) => {
     logger.debug(`[Emit] name:${eventName} data:`, eventData, `socketId: ${socket.id}`);
   };
 
-  // verify user via token
+  // get user token from cookie
   let ip = socket.handshake.headers['x-real-ip'];
   const cookies = socket.handshake.headers['cookie'].split('; ');
   const hexToken = cookies.find(cookie => cookie.startsWith('hex_token='));
 
-  // TODO: insert user verification logic
+  // user verification via token
+  const userInfo = await sql.getOne('SELECT id, username, BIN_TO_UUID(token) AS token, permissions, INET_NTOA(`lastip`) AS lastip FROM users WHERE token = UUID_TO_BIN(?)', hexToken.split('=')[1]);
+  if (userInfo !== null) {
+    if (userInfo.lastip === ip) {
+      logger.http(`${userInfo.username}@${ip} connected. token: ${userInfo.token}`);
+    } else {
+      logger.warn(`${userInfo.lastip} !== ${ip}`);
+      socket.emit('error', 'ip address mismatch');
+      socket.disconnect(true);
+    }
+    logger.verbose(`Database: username=${userInfo.username}, permissions=${userInfo.permissions}`);
+  } else {
+    logger.error(`${hexToken} not found!`);
+    socket.emit('error', 'authentication failed');
+    socket.disconnect(true);
+  }
 
-  logger.http(`user@${ip} connected. token:`, hexToken.split('=')[1]);
-
+  // general events
   socket.on('disconnect', (socket) => {
     delete socketList[socket.id];
     logger.info('User disconnected!');
   });
-
   socket.on('ping', (cb) => {
     if (typeof cb === 'function')
       cb();
   });
-
   socket.on('pong', (pong) => {
     //logger.info({ pong, socketId: socket.id, });
   })
 
-  socket.emit('hello', { hello: 'world' });
+  /**
+   * User has authenticated
+   */
+  if (userInfo !== null) {
+    socket.emit('hello', { hello: userInfo.username });
+  }
 
   /*socket.on('custom_event', (data) => {
     logger.info(`\x1b[31mError: ${err.message}\x1b[0m`);
@@ -116,8 +141,9 @@ process.on('SIGINT', () => {
   logger.error('SIGINT received, shutting down.');
   let conn = typeof Object.keys(socketList).length !== 'undefined' ? Object.keys(socketList).length : 0
   logger.info(`Closing out remaining connections (${conn})`);
-  io.close(() => {
+  io.close(async () => {
     // additional cleanup tasks, e.g., close database connection
+    await sql.disconnect();
     process.exit(0);
   });
 });
@@ -125,8 +151,9 @@ process.on('SIGTERM', () => {
   logger.error('SIGTERM received, shutting down.');
   let conn = typeof Object.keys(socketList).length !== 'undefined' ? Object.keys(socketList).length : 0
   logger.info(`Closing out remaining connections (${conn})`);
-  io.close(() => {
+  io.close(async () => {
     // additional cleanup tasks, e.g., close database connection
+    await sql.disconnect();
     process.exit(0);
   });
 });
