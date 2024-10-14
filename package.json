@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hexforged/api.git"
+    "url": "git+https://github.com/hexforged/dolphin.git"
   },
   "keywords": [
     "hexforged",
@@ -23,11 +23,12 @@
   "author": "Sean Bruen <kyau@hexforged.com> (https://hexforged.com/)",
   "license": "AGPL-3.0-or-later",
   "bugs": {
-    "url": "https://github.com/hexforged/server/issues"
+    "url": "https://github.com/hexforged/dolphin/issues"
   },
-  "homepage": "https://github.com/hexforged/server#readme",
+  "homepage": "https://github.com/hexforged/dolphin#readme",
   "dependencies": {
     "dotenv": "latest",
+    "mysql": "latest",
     "winston": "latest",
     "winston-daily-rotate-file": "latest",
     "socket.io": "latest"

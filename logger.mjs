@@ -1,5 +1,5 @@
 /**
- * $KYAULabs: logger.js,v 0.1.0 2024/10/04 17:29:26 kyau Exp $
+ * $KYAULabs: logger.mjs,v 1.0.1 2024/10/12 22:41:15 -0700 kyau Exp $
  * ▄▄▄▄ ▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  * █ ▄▄ ▄ ▄▄▄▄ ▄▄ ▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄ ▄▄▄  ▀
  * █ ██ █ ██ ▀ ██ █ ██ ▀ ██ █ ██ █ ██    ██ ▀ ██ █ █
@@ -29,63 +29,125 @@ import * as util from 'util';
 import * as winston from 'winston';
 import 'winston-daily-rotate-file';
 
+/**
+ * RFC5424: logging severity levels
+ *
+ * 0	error
+ * 1	warn
+ * 2	info
+ * 3	http
+ * 4	verbose
+ * 5	debug
+ * 6	silly
+ *
+ */
+
 const {
 	format,
 	createLogger,
 	transports,
 	config: {
-		npm: { levels },
+		npm: { colors, levels },
 	},
 } = winston;
 
+//console.log(winston.config.npm);
+
+/**
+ * Combines the message with additional arguments (splat) if any, and uppercases the log level.
+ * 
+ * @function combineMessageAndSplat
+ * @param {Object} info - The log information object containing message, level, and splat arguments.
+ * @param {Object} opts - Optional formatting options (not used in this implementation).
+ * @returns {Object} The modified log info with the combined message and uppercase level.
+ */
 const combineMessageAndSplat = format((info, opts) => {
 	// combine message and args if any
 	info.message = util.format(
 		info.message,
 		...(info[Symbol.for('splat')] || [])
 	);
+	// uppercase levels
+	info.level = info.level.replace(
+		/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').toUpperCase();
 	return info;
 });
 
+/**
+ * Creates a console transport for logging to the console with various formatting options.
+ * 
+ * @constant
+ * @type {winston.transports.ConsoleTransportInstance}
+ */
 const consoleTransport = new transports.Console({
 	level: 'silly',
 	handleExceptions: true,
 	json: true,
-	format: format.combine(
+	format: format.combine(format.colorize(), format.combine(
 		format.errors({ stack: true }),
 		combineMessageAndSplat(),
-		format.timestamp({ format: 'HH:mm:ss.SSS' }),
-		format.colorize(),
+		format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+		format.label({ label: '[dolphin]' }),
 		format.printf(
 			({ level, message, timestamp, stack }) =>
-				`${timestamp} ${level}: ${message} ${stack || ""}`
-		)
-	),
+				`[${timestamp}] [${level}] ${message} ${stack || ''}`
+		),
+		format.colorize({ all: true }),
+	)),
 });
 
+/**
+ * Creates a file transport using DailyRotateFile for logging to rotating log files.
+ * 
+ * @constant
+ * @type {winston.transports.DailyRotateFileTransportInstance}
+ */
 const fileTransport = new transports.DailyRotateFile({
 	level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-	filename: './logs/dolphin-%DATE%.log',
 	colorize: false,
-	json: true,
-	datePattern: 'YYYY-MM-DD-HH',
-	zippedArchive: true,
+	createSymlink: true,
+	dirname: 'logs',
+	auditFile: './logs/.audit.json',
+	filename: 'dolphin-%DATE%.log',
+	datePattern: 'YYYY-MM-DD',
 	maxSize: '20m',
-	maxFiles: '1d'
+	maxFiles: '14d',
+	symlinkName: 'dolphin.log',
+	utc: true,
+	zippedArchive: true,
 });
 
+/**
+ * Creates an error-specific file transport using DailyRotateFile for logging error messages to rotating files.
+ * 
+ * @constant
+ * @type {winston.transports.DailyRotateFileTransportInstance}
+ */
 const errorTransport = new transports.DailyRotateFile({
 	level: 'error',
-	filename: './logs/dolphin-error-%DATE%.log',
 	colorize: false,
+	createSymlink: true,
+	dirname: 'logs',
+	auditFile: './logs/.audit-error.json',
+	filename: 'dolphin-error-%DATE%.log',
 	handleExceptions: true,
-	json: true,
-	datePattern: 'YYYY-MM-DD-HH',
-	zippedArchive: true,
+	datePattern: 'YYYY-MM-DD',
 	maxSize: '20m',
-	maxFiles: '1d'
+	maxFiles: '14d',
+	symlinkName: 'dolphin-error.log',
+	utc: true,
+	zippedArchive: true,
 });
 
+/**
+ * Logger configuration using winston with file, console, and error transports.
+ * 
+ * @constant
+ * @type {winston.Logger}
+ */
+let rcolors = colors;
+rcolors.info = 'white';
+winston.addColors(rcolors);
 const logger = createLogger({
 	levels: levels,
 	defaultMeta: {
@@ -101,7 +163,4 @@ const logger = createLogger({
 });
 
 export { logger };
-
-/**
- * vim: ft=javascript sts=2 sw=2 ts=2 noet:
- */
+export default logger;
