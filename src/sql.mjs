@@ -1,5 +1,5 @@
 /**
- * $KYAULabs: mysql.js,v 1.0.0 2024/10/12 22:25:15 -0700 kyau Exp $
+ * $KYAULabs: sql.mjs,v 1.0.1 2024/10/17 14:29:42 -0700 kyau Exp $
  * ▄▄▄▄ ▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  * █ ▄▄ ▄ ▄▄▄▄ ▄▄ ▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄ ▄▄▄  ▀
  * █ ██ █ ██ ▀ ██ █ ██ ▀ ██ █ ██ █ ██    ██ ▀ ██ █ █
@@ -37,9 +37,15 @@ class MySQLHandler {
    * Initializes the MySQLHandler instance with default properties.
    * Sets the hostname to 'localhost' and connection to null.
    */
-  constructor() {
+  constructor(queue) {
     this.hostname = 'localhost';
     this.connection = null;
+    this.queue = queue;
+    try {
+      this.connect();
+    } catch (error) {
+      logger.error(error);
+    }
   }
 
   /**
