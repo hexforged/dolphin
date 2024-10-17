@@ -1,5 +1,5 @@
 /**
- * $KYAULabs: dolphin.js,v 1.0.2 2024/10/12 22:25:02 -0700 kyau Exp $
+ * $KYAULabs: dolphin.js,v 1.0.3 2024/10/17 14:28:45 -0700 kyau Exp $
  * ▄▄▄▄ ▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  * █ ▄▄ ▄ ▄▄▄▄ ▄▄ ▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄ ▄▄▄▄▄ ▄▄▄▄ ▄▄▄  ▀
  * █ ██ █ ██ ▀ ██ █ ██ ▀ ██ █ ██ █ ██    ██ ▀ ██ █ █
@@ -26,11 +26,26 @@
  */
 
 import 'dotenv/config';
-import { logger } from './logger.mjs';
-import { MySQLHandler } from './sql.mjs';
+import { logger } from './src/logger.mjs';
+import { Queue } from './src/queue.mjs';
+import { MySQLHandler } from './src/sql.mjs';
+import { character } from './src/controller/character.mjs';
+import { hexmap } from './src/controller/map.mjs';
 import { Server } from 'socket.io';
 
+console.log(` \x1b[0;34m\udb86\udcb4 \x1b[0;37mdolphin\x1b[0m \x1b[2;37m(${process.env.NODE_ENV})\x1b[0m`);
+console.log(`\x1b[4C\x1b[38;5;214mhttps://hexforged.com/dolphin\x1b[0m`);
+logger.info('Server started.');
+
+/**
+ * TCP port that the server runs on.
+ * @constant {number}
+ */
 const PORT = process.env.port || 4242;
+/**
+ * Socket.io server object.
+ * @constant {Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, any>}
+ */
 const io = new Server(PORT, {
   cors: {
     origin: process.env.NODE_ENV === 'production' ? 'https://hexforged.com' : '*',
@@ -39,73 +54,71 @@ const io = new Server(PORT, {
   },
   path: '/dolphin/',
   pingInterval: 2000,
-  pingTimeout: 5000,
+  pingTimeout: 6000,
   transports: [ 'websocket', 'polling' ]
 });
+const queue = new Queue(500);
+/**
+ * SQL handler object (asynchronous).
+ * @constant {MySQLHandler}
+ */
+const sql = new MySQLHandler(queue);
 
-console.log(`\x1b[0;36m\udb86\udcb4  \x1b[0;35mdolphin\x1b[0m \x1b[2;37m(${process.env.NODE_ENV})\x1b[0m`);
-console.log(`\x1b[3C\x1b[38;5;214mhttps://hexforged.com/dolphin\x1b[0m`);
-logger.info('Server started.');
-
-const sql = new MySQLHandler();
+let _league;
 try {
-  await sql.connect();
+  _league = (await sql.getOne('SELECT name FROM leagues ORDER BY id DESC LIMIT 1')).name.toLowerCase();
+  logger.info(`League: ${_league[0].toUpperCase() + _league.substring(1)}`);
 } catch (error) {
+  logger.warn('Failed to retrieve current league in play.');
   logger.error(error);
 }
-
-let socketList = {};
+/**
+ * Current Hexforged league in play.
+ * @constant {string}
+ */
+const league = _league;
+let sockets = {};
 // Handle connections
 io.on('connection', async (socket) => {
-  socket.on('*', (packet) => {
-    const [eventName, eventData] = packet.data;
-    logger.info({ eventName, eventData, socketId: socket.id, });
+  // log all incoming socket events
+  socket.onAny((event, ...args) => {
+    if (event !== 'ping' && event !== 'pong') {
+      logger.debug(`[Event] ${event}:`, args, `socket: ${socket.id}`);
+    }
   });
 
-  socketList[socket.id] = socket;
-
+  // the original socket emitters
   let _io_emit = io.emit;
   let _socket_emit = socket.emit;
 
+  // log all outgoing server events
   io.emit = function () {
     _io_emit.apply(io, arguments);
     let { 0: eventName, 1: eventData } = arguments;
-    logger.debug(`[Global Emit] name:${eventName}`, eventData);
+    logger.debug(`[Global Emit] ${eventName}:`, eventData);
   };
     
+  // log all outgoing socket events
   socket.emit = function () {
     _socket_emit.apply(socket, arguments);
     let { 0: eventName, 1: eventData } = arguments;
-    logger.debug(`[Emit] name:${eventName} data:`, eventData, `socketId: ${socket.id}`);
+    logger.debug(`[Emit] ${eventName}:`, eventData, `socket: ${socket.id}`);
   };
 
-  // get user token from cookie
-  let ip = socket.handshake.headers['x-real-ip'];
-  const cookies = socket.handshake.headers['cookie'].split('; ');
-  const hexToken = cookies.find(cookie => cookie.startsWith('hex_token='));
-
-  // user verification via token
-  const userInfo = await sql.getOne('SELECT id, username, BIN_TO_UUID(token) AS token, permissions, INET_NTOA(`lastip`) AS lastip FROM users WHERE token = UUID_TO_BIN(?)', hexToken.split('=')[1]);
-  if (userInfo !== null) {
-    if (userInfo.lastip === ip) {
-      logger.http(`${userInfo.username}@${ip} connected. token: ${userInfo.token}`);
-    } else {
-      logger.warn(`${userInfo.lastip} !== ${ip}`);
-      socket.emit('error', 'ip address mismatch');
-      socket.disconnect(true);
-    }
-    logger.verbose(`Database: username=${userInfo.username}, permissions=${userInfo.permissions}`);
-  } else {
-    logger.error(`${hexToken} not found!`);
-    socket.emit('error', 'authentication failed');
-    socket.disconnect(true);
-  }
-
   // general events
-  socket.on('disconnect', (socket) => {
-    delete socketList[socket.id];
-    logger.info('User disconnected!');
+  socket.on('disconnect', (reason) => {
+    delete sockets[socket.id];
+    logger.info(`User disconnected (${reason})!`);
   });
+
+  // assign the league to the socket
+  socket.league = league;
+
+  // verify the user logging in and load character and/or reroute to
+  // character creation
+  character(socket, sockets, sql);
+
+  // ping? pong.
   socket.on('ping', (cb) => {
     if (typeof cb === 'function')
       cb();
@@ -114,16 +127,8 @@ io.on('connection', async (socket) => {
     //logger.info({ pong, socketId: socket.id, });
   })
 
-  /**
-   * User has authenticated
-   */
-  if (userInfo !== null) {
-    socket.emit('hello', { hello: userInfo.username });
-  }
-
-  /*socket.on('custom_event', (data) => {
-    logger.info(`\x1b[31mError: ${err.message}\x1b[0m`);
-  });*/
+  // map events
+  hexmap(socket, sql);
 });
 
 // Handle unhandled promise rejections
@@ -136,24 +141,27 @@ process.on('uncaughtException', (error) => {
   logger.error(`Caught exception: ${error}\n` + `Exception origin: ${error.stack}`);
 });
 
-// graceful shutdown
-process.on('SIGINT', () => {
-  logger.error('SIGINT received, shutting down.');
-  let conn = typeof Object.keys(socketList).length !== 'undefined' ? Object.keys(socketList).length : 0
-  logger.info(`Closing out remaining connections (${conn})`);
-  io.close(async () => {
-    // additional cleanup tasks, e.g., close database connection
-    await sql.disconnect();
-    process.exit(0);
-  });
-});
-process.on('SIGTERM', () => {
-  logger.error('SIGTERM received, shutting down.');
-  let conn = typeof Object.keys(socketList).length !== 'undefined' ? Object.keys(socketList).length : 0
-  logger.info(`Closing out remaining connections (${conn})`);
-  io.close(async () => {
-    // additional cleanup tasks, e.g., close database connection
-    await sql.disconnect();
-    process.exit(0);
+// Handle graceful shutdowns
+const signals = [
+  'SIGUSR1', 'SIGUSR2', 'SIGTERM', 'SIGINT', 'SIGHUP'
+];
+signals.forEach((signal) => {
+  process.on(signal, async (code) => {
+    if (signal.substring(0, signal.length - 1) === 'SIGUSR') {
+      logger.warn(`${signal} received, restarting...`);
+    } else {
+      logger.error(`${signal} received, shutting down.`);
+    }
+    // additional cleanup tasks
+    try {
+      await sql.disconnect();
+    } catch (error) {
+      logger.error(error);
+    }
+    let conn = typeof Object.keys(sockets).length !== 'undefined' ? Object.keys(sockets).length : 0
+    logger.info(`Closing out remaining connections (${conn})`);
+    io.close(() => {
+      process.exit(0);
+    });
   });
 });
